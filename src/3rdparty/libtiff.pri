@@ -16,9 +16,11 @@ SOURCES += \
     $$PWD/libtiff/libtiff/tif_fax3sm.c \
     $$PWD/libtiff/libtiff/tif_flush.c \
     $$PWD/libtiff/libtiff/tif_getimage.c \
+    $$PWD/libtiff/libtiff/tif_jpeg.c \
     $$PWD/libtiff/libtiff/tif_luv.c \
     $$PWD/libtiff/libtiff/tif_lzw.c \
     $$PWD/libtiff/libtiff/tif_next.c \
+    $$PWD/libtiff/libtiff/tif_ojpeg.c \
     $$PWD/libtiff/libtiff/tif_open.c \
     $$PWD/libtiff/libtiff/tif_packbits.c \
     $$PWD/libtiff/libtiff/tif_pixarlog.c \
@@ -40,3 +42,5 @@ else:         SOURCES += $$PWD/libtiff/libtiff/tif_unix.c
 android:      SOURCES += $$PWD/libtiff/port/lfind.c
 
 include($$PWD/zlib_dependency.pri)
+
+QMAKE_USE_PRIVATE += libjpeg

@@ -115,7 +115,9 @@ public:
     QImageIOHandler::Transformations transformation;
     QImage::Format format;
     QSize size;
+    QSize dpm;
     uint16 photometric;
+    uint16 compTechnique;
     bool grayscale;
     bool headersRead;
     int currentDirectory;
@@ -180,6 +182,7 @@ QTiffHandlerPrivate::QTiffHandlerPrivate()
     , headersRead(false)
     , currentDirectory(0)
     , directoryCount(0)
+    , compTechnique(0)
 {
 }
 
@@ -254,6 +257,25 @@ bool QTiffHandlerPrivate::readHeaders(QIODevice *device)
     }
     size = QSize(width, height);
 
+    float resX = 0;
+    float resY = 0;
+    uint16 resUnit;
+    if (!TIFFGetField(tiff, TIFFTAG_RESOLUTIONUNIT, &resUnit))
+        resUnit = RESUNIT_INCH;
+    if (TIFFGetField(tiff, TIFFTAG_XRESOLUTION, &resX)
+        && TIFFGetField(tiff, TIFFTAG_YRESOLUTION, &resY)) {
+        switch (resUnit) {
+        case RESUNIT_CENTIMETER:
+            dpm.setWidth(qRound(resX * 100));
+            dpm.setHeight(qRound(resY * 100));
+            break;
+        case RESUNIT_INCH:
+            dpm.setWidth(qRound(resX * (100 / 2.54)));
+            dpm.setHeight(qRound(resY * (100 / 2.54)));
+            break;
+        }
+    }
+
     uint16 orientationTag;
     if (TIFFGetField(tiff, TIFFTAG_ORIENTATION, &orientationTag))
         transformation = exif2Qt(orientationTag);
@@ -307,6 +329,12 @@ bool QTiffHandlerPrivate::readHeaders(QIODevice *device)
         }
     }
 
+    uint16 tiffcomp;
+    compTechnique = COMPRESSION_NONE;
+    if (TIFFGetFieldDefaulted(tiff, TIFFTAG_COMPRESSION, &tiffcomp)) {
+        compTechnique = tiffcomp;
+    }
+
     headersRead = true;
     return true;
 }
@@ -353,6 +381,9 @@ bool QTiffHandler::read(QImage *image)
     }
 
     TIFF *const tiff = d->tiff;
+    if (!tiff)
+        return false;
+
     const quint32 width = d->size.width();
     const quint32 height = d->size.height();
 
@@ -437,6 +468,10 @@ bool QTiffHandler::read(QImage *image)
             }
             _TIFFfree(buf);
         } else {
+            if (image->bytesPerLine() < TIFFScanlineSize(tiff)) {
+                d->close();
+                return false;
+            }
             for (uint32 y=0; y<height; ++y) {
                 if (TIFFReadScanline(tiff, image->scanLine(y), y, 0) < 0) {
                     d->close();
@@ -817,6 +852,12 @@ QVariant QTiffHandler::option(ImageOption option) const
     } else if (option == ImageTransformation) {
         if (d->readHeaders(device()))
             return int(d->transformation);
+    } else if (option == DotsPerMeter) {
+        if (d->readHeaders(device()))
+            return d->dpm;
+    } else if (option == CompressionTechnique) {
+        if (d->readHeaders(device()))
+            return d->compTechnique;
     }
     return QVariant();
 }
@@ -838,7 +879,9 @@ bool QTiffHandler::supportsOption(ImageOption option) const
             || option == Size
             || option == ImageFormat
             || option == ImageTransformation
-            || option == TransformedByDefault;
+            || option == TransformedByDefault
+            || option == DotsPerMeter
+            || option == CompressionTechnique;
 }
 
 bool QTiffHandler::jumpToNextImage()

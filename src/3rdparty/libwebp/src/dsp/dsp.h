@@ -95,6 +95,10 @@ extern "C" {
 #define WEBP_USE_INTRINSICS
 #endif
 
+#if defined(__arm64__)
+#undef WEBP_USE_NEON
+#endif
+
 #if defined(__mips__) && !defined(__mips64) && \
     defined(__mips_isa_rev) && (__mips_isa_rev >= 1) && (__mips_isa_rev < 6)
 #define WEBP_USE_MIPS32

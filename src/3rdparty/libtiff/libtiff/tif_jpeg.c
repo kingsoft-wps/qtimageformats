@@ -78,12 +78,14 @@ int TIFFJPEGIsFullStripRequired_12(TIFF* tif);
    the JPEG library distribution for details.
 */
 
+#if 0
 /* Define "boolean" as unsigned char, not int, per Windows custom. */
 #if defined(__WIN32__) && !defined(__MINGW32__)
 # ifndef __RPCNDR_H__            /* don't conflict if rpcndr.h already read */
    typedef unsigned char boolean;
 # endif
 # define HAVE_BOOLEAN            /* prevent jmorecfg.h from redefining it */
+#endif
 #endif
 
 #include "jpeglib.h"
@@ -742,11 +744,9 @@ static int
 JPEGFixupTags(TIFF* tif)
 {
 #ifdef CHECK_JPEG_YCBCR_SUBSAMPLING
-        JPEGState* sp = JState(tif);
 	if ((tif->tif_dir.td_photometric==PHOTOMETRIC_YCBCR)&&
 	    (tif->tif_dir.td_planarconfig==PLANARCONFIG_CONTIG)&&
-	    (tif->tif_dir.td_samplesperpixel==3) &&
-            !sp->ycbcrsampling_fetched)
+	    (tif->tif_dir.td_samplesperpixel==3))
 		JPEGFixupTagsSubsampling(tif);
 #endif
         
