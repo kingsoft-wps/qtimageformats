@@ -204,12 +204,14 @@ static const TIFFField ojpegFields[] = {
 # define XMD_H 1
 #endif
 
+#if 0
 /* Define "boolean" as unsigned char, not int, per Windows custom. */
 #if defined(__WIN32__) && !defined(__MINGW32__)
 # ifndef __RPCNDR_H__            /* don't conflict if rpcndr.h already read */
    typedef unsigned char boolean;
 # endif
 # define HAVE_BOOLEAN            /* prevent jmorecfg.h from redefining it */
+#endif
 #endif
 
 #include "jpeglib.h"

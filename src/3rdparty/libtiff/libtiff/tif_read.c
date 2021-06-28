@@ -603,7 +603,7 @@ TIFFReadRawStrip1(TIFF* tif, uint32_t strip, void* buf, tmsize_t size,
 				     tif->tif_row,
 				     cc,
 				     size);
-			return ((tmsize_t)(-1));
+			// return ((tmsize_t)(-1)); //<DP> To decode some nasty images
 		}
 	} else {
 		tmsize_t ma = 0;
