@@ -47,7 +47,8 @@
 QT_BEGIN_NAMESPACE
 
 class QIODevice;
-
+struct TgaReader;
+struct TgaRleReader;
 class QTgaFile
 {
     Q_DECLARE_TR_FUNCTIONS(QTgaFile)
@@ -91,15 +92,22 @@ public:
     inline int yOffset() const;
     inline int width() const;
     inline int height() const;
+    inline bool yCorner() const;
+    inline bool xCorner() const;
     inline QSize size() const;
     inline Compression compression() const;
 
 private:
     static inline quint16 littleEndianInt(const unsigned char *d);
+    void rleCMapProcess(QVector<QRgb>& cMap, TgaReader* pReader, QImage& img);
+    void rleProcess(TgaReader* pReader, QImage& img);
+    void noCompressProcess(TgaReader* pReader, QImage& img);
+    void noCompressCMapProcess(QVector<QRgb>& cMap, TgaReader* pReader, QImage& img);
 
     QString mErrorMessage;
     unsigned char mHeader[HeaderSize];
     QIODevice *mDevice;
+    bool m_bHighVersion;
 };
 
 inline bool QTgaFile::isValid() const
@@ -148,9 +156,20 @@ inline QSize QTgaFile::size() const
 
 inline QTgaFile::Compression QTgaFile::compression() const
 {
-    // TODO: for now, only handle type 2 files, with no color table
-    // and no compression
+    if (mHeader[ImageType] > 8 && mHeader[ImageType] < 12)
+        return RleCompression;
+
     return NoCompression;
+}
+
+inline bool QTgaFile::yCorner() const
+{
+    return mHeader[ImageDescriptor] & 0x20;;
+}
+
+inline bool QTgaFile::xCorner() const
+{
+    return mHeader[ImageDescriptor] & 0x10;;
 }
 
 QT_END_NAMESPACE

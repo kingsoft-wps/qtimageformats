@@ -43,6 +43,34 @@
 #include <QtCore/QDebug>
 #include <QtCore/QDateTime>
 
+QT_BEGIN_NAMESPACE
+
+struct RleInfo
+{
+    int repeat;
+    int number;
+};
+
+struct TgaRleReader
+{
+    Q_DISABLE_COPY(TgaRleReader)
+    TgaRleReader() = default;
+
+    RleInfo operator()(QIODevice *s) const
+    {
+        char ch1;
+        if (s->getChar(&ch1)) {
+            RleInfo rleInfo;
+            rleInfo.repeat = uchar(ch1) >> 7;
+            rleInfo.number = (uchar(ch1) & 0x7F) + 1;
+            return rleInfo;
+        }
+        else {
+            return RleInfo();
+        }
+    }
+};
+
 struct TgaReader
 {
     Q_DISABLE_COPY(TgaReader)
@@ -51,6 +79,35 @@ struct TgaReader
 
     virtual ~TgaReader() {}
     virtual QRgb operator()(QIODevice *s) const = 0;
+    virtual int getIndex(QIODevice* s) const = 0;
+};
+
+struct Tga8Reader : public TgaReader
+{
+    ~Tga8Reader() {}
+    QRgb operator()(QIODevice *s) const override
+    {
+        char ch1;
+        if (s->getChar(&ch1)) {
+            return qRgb(quint8(ch1), quint8(ch1), quint8(ch1));
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    int getIndex(QIODevice* s) const override
+    {
+        char ch1;
+        if (s->getChar(&ch1)) {
+            return quint8(ch1);
+        }
+        else
+        {
+            return 0;
+        }
+    }
 };
 
 struct Tga16Reader : public TgaReader
@@ -60,13 +117,24 @@ struct Tga16Reader : public TgaReader
     {
         char ch1, ch2;
         if (s->getChar(&ch1) && s->getChar(&ch2)) {
-            quint16 d = (int(ch1) & 0xFF) | ((int(ch2) & 0xFF) << 8);
-            QRgb result = (d & 0x8000) ? 0xFF000000 : 0x00000000;
-            result |= ((d & 0x7C00) << 6) | ((d & 0x03E0) << 3) | (d & 0x001F);
+            quint16 d = uchar(ch1) | (uchar(ch2) << 8);
+            QRgb result =  0xff000000u | ((d & 0x7C00) << 9) | ((d & 0x03E0) << 6) | ((d & 0x001F) << 3);
             return result;
-        } else {
-            return 0;
         }
+
+        return 0;
+    }
+
+    int getIndex(QIODevice* s) const override
+    {
+        char ch1, ch2;
+        if (s->getChar(&ch1) && s->getChar(&ch2))
+        {
+            quint16 d = (uchar(ch1) & 0xFF) | ((uchar(ch2) & 0xFF) << 8);
+            return d;
+        }
+
+        return 0;
     }
 };
 
@@ -77,8 +145,19 @@ struct Tga24Reader : public TgaReader
         char r, g, b;
         if (s->getChar(&b) && s->getChar(&g) && s->getChar(&r))
             return qRgb(uchar(r), uchar(g), uchar(b));
-        else
-            return 0;
+
+        return 0;
+    }
+
+    int getIndex(QIODevice* s) const override
+    {
+        char ch1, ch2, ch3;
+        if (s->getChar(&ch1) && s->getChar(&ch2) && s->getChar(&ch3))
+        {
+            quint32 d = (uchar(ch3) << 16) | (uchar(ch2) << 8) | uchar(ch1);
+            return d;
+        }
+        return 0;
     }
 };
 
@@ -92,7 +171,35 @@ struct Tga32Reader : public TgaReader
         else
             return 0;
     }
+
+    int getIndex(QIODevice* s) const override
+    {
+        char ch1, ch2, ch3, ch4;
+        if (s->getChar(&ch1) && s->getChar(&ch2) && s->getChar(&ch3) && s->getChar(&ch4))
+        {
+            quint32 d = (uchar(ch4) << 24) | (uchar(ch3) << 16) | (uchar(ch2) << 8) | uchar(ch1);
+            return d;
+        }
+
+        return 0;
+    }
 };
+
+static TgaReader* newReader(int depth)
+{
+    TgaReader* reader = NULL;
+    if (depth == 8)
+        reader = new Tga8Reader();
+    else if (depth == 16)
+        reader = new Tga16Reader();
+    else if (depth == 24)
+        reader = new Tga24Reader();
+    else if (depth == 32)
+        reader = new Tga32Reader();
+
+    return reader;
+}
+
 
 /*!
     \class QTgaFile
@@ -131,6 +238,7 @@ struct Tga32Reader : public TgaReader
 */
 QTgaFile::QTgaFile(QIODevice *device)
     : mDevice(device)
+    , m_bHighVersion(false)
 {
     ::memset(mHeader, 0, HeaderSize);
     if (!mDevice->isReadable())
@@ -152,23 +260,19 @@ QTgaFile::QTgaFile(QIODevice *device)
         mErrorMessage = tr("Image header read failed");
         return;
     }
-    if (mHeader[ImageType] != 2)
+    bool bSupport = (mHeader[ImageType] >= 0 && mHeader[ImageType] <= 3)
+        || (mHeader[ImageType] >= 9 && mHeader[ImageType] <= 11);
+    if (!bSupport)
     {
         // TODO: should support other image types
         mErrorMessage = tr("Image type not supported");
         return;
     }
     int bitsPerPixel = mHeader[PixelDepth];
-    bool validDepth = (bitsPerPixel == 16 || bitsPerPixel == 24 || bitsPerPixel == 32);
+    bool validDepth = (bitsPerPixel == 8 || bitsPerPixel == 16 || bitsPerPixel == 24 || bitsPerPixel == 32);
     if (!validDepth)
     {
         mErrorMessage = tr("Image depth not valid");
-        return;
-    }
-    if (quint64(width()) * quint64(height()) > (8192 * 8192))
-    {
-        mErrorMessage = tr("Image size exceeds limit");
-        return;
     }
     int curPos = mDevice->pos();
     int fileBytes = mDevice->size();
@@ -181,10 +285,7 @@ QTgaFile::QTgaFile(QIODevice *device)
     if (mDevice->read(reinterpret_cast<char*>(footer), FooterSize) != FooterSize) {
         mErrorMessage = tr("Could not read footer");
     }
-    if (qstrncmp(&footer[SignatureOffset], "TRUEVISION-XFILE", 16) != 0)
-    {
-        mErrorMessage = tr("Image type (non-TrueVision 2.0) not supported");
-    }
+    m_bHighVersion = (qstrncmp(&footer[SignatureOffset], "TRUEVISION-XFILE", 16) == 0);
     if (!mDevice->seek(curPos))
     {
         mErrorMessage = tr("Could not reset to read data");
@@ -218,51 +319,45 @@ QImage QTgaFile::readImage()
     if (!isValid())
         return QImage();
 
+    if (mHeader[ImageType] == 0) //The type is No Image Data
+        return QImage();
+
     int offset = mHeader[IdLength];  // Mostly always zero
-
-    // Even in TrueColor files a color pallette may be present
-    if (mHeader[ColorMapType] == 1)
-        offset += littleEndianInt(&mHeader[CMapLength]) * littleEndianInt(&mHeader[CMapDepth]);
-
     mDevice->seek(HeaderSize + offset);
 
-    char dummy;
-    for (int i = 0; i < offset; ++i)
-        mDevice->getChar(&dummy);
+    // color map
+    int cmapLength = littleEndianInt(&mHeader[CMapLength]);
+    int cmapDepth = littleEndianInt(&mHeader[CMapDepth]);
+    
+    QVector<QRgb> colorMap;
+    TgaReader* cmapReader = newReader(cmapDepth);
+    if(cmapReader == nullptr && cmapLength > 0)
+        return QImage();
+
+    TgaReader& cmapRead = *cmapReader;
+    while (cmapLength--)
+        colorMap.push_back(cmapRead(mDevice));
+    delete cmapReader;
 
     int bitsPerPixel = mHeader[PixelDepth];
     int imageWidth = width();
     int imageHeight = height();
 
-    unsigned char desc = mHeader[ImageDescriptor];
-    //unsigned char xCorner = desc & 0x10; // 0 = left, 1 = right
-    unsigned char yCorner = desc & 0x20; // 0 = lower, 1 = upper
-
     QImage im(imageWidth, imageHeight, QImage::Format_ARGB32);
-    if (im.isNull())
-        return QImage();
-    TgaReader *reader = 0;
-    if (bitsPerPixel == 16)
-        reader = new Tga16Reader();
-    else if (bitsPerPixel == 24)
-        reader = new Tga24Reader();
-    else if (bitsPerPixel == 32)
-        reader = new Tga32Reader();
-    TgaReader &read = *reader;
-
-    // For now only deal with yCorner, since no one uses xCorner == 1
-    // Also this is upside down, since Qt has the origin flipped
-    if (yCorner)
+    TgaReader* reader = newReader(bitsPerPixel);
+    if (compression() == QTgaFile::NoCompression)
     {
-        for (int y = 0; y < imageHeight; ++y)
-            for (int x = 0; x < imageWidth; ++x)
-                im.setPixel(x, y, read(mDevice));
+        if (mHeader[ImageType] == 2 || mHeader[ImageType] == 3)
+            noCompressProcess(reader, im);
+        if (mHeader[ImageType] == 1)
+            noCompressCMapProcess(colorMap, reader, im);
     }
     else
     {
-        for (int y = imageHeight - 1; y >= 0; --y)
-            for (int x = 0; x < imageWidth; ++x)
-                im.setPixel(x, y, read(mDevice));
+        if (mHeader[ImageType] == 10 || mHeader[ImageType] == 11)
+            rleProcess(reader, im);
+        if (mHeader[ImageType] == 9)
+            rleCMapProcess(colorMap, reader, im);
     }
 
     delete reader;
@@ -270,3 +365,90 @@ QImage QTgaFile::readImage()
     // TODO: add processing of TGA extension information - ie TGA 2.0 files
     return im;
 }
+
+void QTgaFile::rleCMapProcess(QVector<QRgb>& cMap, TgaReader* pReader, QImage& img)
+{
+    int y = 0, x = 0;
+
+    TgaRleReader rleReader;
+    TgaReader& read = *pReader;
+    while (y < height())
+    {
+        RleInfo rleInfo = rleReader(mDevice);
+        if (rleInfo.number == 0) break;
+        int index = 0;
+        if (rleInfo.repeat == 1)
+            index = read.getIndex(mDevice);
+        while (rleInfo.number--)
+        {
+            if (rleInfo.repeat == 0)
+                index = read.getIndex(mDevice);
+            int curX = xCorner() ? width() - x - 1 : x;
+            int curY = !yCorner() ? height() - y - 1 : y;
+            img.setPixel(curX, curY, cMap[index]);
+            x++;
+            if (x == width())
+            {
+                x = 0;
+                y++;
+            }
+        }
+    }
+}
+
+void QTgaFile::rleProcess(TgaReader* pReader, QImage& img)
+{
+    int y = 0, x = 0;
+    TgaRleReader rleReader;
+    TgaReader& read = *pReader;
+    while (y < height())
+    {
+        RleInfo rleInfo = rleReader(mDevice);
+        if (rleInfo.number == 0)
+            break;
+        QRgb curColor = 0;
+        if (rleInfo.repeat == 1)
+            curColor = read(mDevice);
+        while (rleInfo.number--)
+        {
+            if (rleInfo.repeat == 0)
+                curColor = read(mDevice);
+
+            int curX = xCorner() ? width() - x - 1 : x;
+            int curY = !yCorner() ? height() - y - 1 : y;
+            img.setPixel(curX, curY, curColor);
+            x++;
+            if (x == width())
+            {
+                x = 0;
+                y++;
+            }
+        }
+    }
+}
+
+void QTgaFile::noCompressProcess(TgaReader* pReader, QImage& img)
+{
+    TgaReader& read = *pReader;
+    for (int y = 0; y < height(); ++y)
+        for (int x = 0; x < width(); ++x)
+        {
+            int curX = xCorner() ? width() - x - 1 : x;
+            int curY = !yCorner() ? height() - y - 1 : y;
+            img.setPixel(curX, curY, read(mDevice));
+        }
+}
+
+void QTgaFile::noCompressCMapProcess(QVector<QRgb>& cMap, TgaReader* pReader, QImage& img)
+{
+    TgaReader& read = *pReader;
+    for (int y = 0; y < height(); ++y)
+        for (int x = 0; x < width(); ++x)
+        {
+            int curX = xCorner() ? width() - x - 1 : x;
+            int curY = !yCorner() ? height() - y - 1 : y;
+            img.setPixel(curX, curY, cMap[read.getIndex(mDevice)]);
+        }
+}
+
+QT_END_NAMESPACE
