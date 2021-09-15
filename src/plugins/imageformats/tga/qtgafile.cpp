@@ -260,6 +260,10 @@ QTgaFile::QTgaFile(QIODevice *device)
         mErrorMessage = tr("Image header read failed");
         return;
     }
+    if (mHeader[ColorMapType] != 0 && mHeader[ColorMapType] != 1) {
+        mErrorMessage = tr("Invalid ColorMapType");
+        return;
+    }
     bool bSupport = (mHeader[ImageType] >= 0 && mHeader[ImageType] <= 3)
         || (mHeader[ImageType] >= 9 && mHeader[ImageType] <= 11);
     if (!bSupport)
@@ -267,6 +271,19 @@ QTgaFile::QTgaFile(QIODevice *device)
         // TODO: should support other image types
         mErrorMessage = tr("Image type not supported");
         return;
+    }
+    if (1 == mHeader[ColorMapType]) {
+        const int nCMapStart = littleEndianInt(&mHeader[CMapStart]);
+        const int nCMapLength = littleEndianInt(&mHeader[CMapLength]);
+        if (nCMapStart >= nCMapLength) {
+            mErrorMessage = tr("Invalid ColorMap");
+            return;
+        }
+
+        if (0 == mHeader[CMapDepth] || mHeader[CMapDepth] > 32) {
+            mErrorMessage = tr("Invalid ColorMapDepth");
+            return;
+        }
     }
     int bitsPerPixel = mHeader[PixelDepth];
     bool validDepth = (bitsPerPixel == 8 || bitsPerPixel == 16 || bitsPerPixel == 24 || bitsPerPixel == 32);
@@ -327,10 +344,9 @@ QImage QTgaFile::readImage()
 
     // color map
     int cmapLength = littleEndianInt(&mHeader[CMapLength]);
-    int cmapDepth = littleEndianInt(&mHeader[CMapDepth]);
     
     QVector<QRgb> colorMap;
-    TgaReader* cmapReader = newReader(cmapDepth);
+    TgaReader *cmapReader = newReader(mHeader[CMapDepth]);
     if(cmapReader == nullptr && cmapLength > 0)
         return QImage();
 
