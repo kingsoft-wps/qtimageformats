@@ -17,7 +17,7 @@
 
 /* Pick up YCbCr subsampling info from the JPEG data stream to support files
    lacking the tag (default enabled). */
-/* #undef CHECK_JPEG_YCBCR_SUBSAMPLING */
+#define CHECK_JPEG_YCBCR_SUBSAMPLING 1
 
 /* enable partial strip reading for large strips (experimental) */
 /* #undef CHUNKY_STRIP_READ_SUPPORT */
